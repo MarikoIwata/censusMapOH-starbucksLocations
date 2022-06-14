@@ -1,0 +1,302 @@
+---
+title: "Starbucks Analysis 2021"
+author: "Mariko Iwata"
+date: "12/2021"
+output:
+  rmdformats::downcute:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: false
+    highlight: tango
+
+---
+# 1. Project Question
+What can the location of a Starbucks tell you about its population density in Ohio?
+
+## 1.1 Purpose of this project
+* to show how I check and clean data
+* to show how I can visualize data through maps
+* show how to get a grasp of census data for a state by county
+* show that I can write rMarkdown in a clean, presentable way
+* show how I can use git to save different versions of a project and share it
+
+
+## 1.2 Libraries
+```{r eval=TRUE, results='hide', message=FALSE}
+library(rmarkdown) #to create an html doc for this project
+library(yaml) #for rmarkdown
+library(rmdformats) #for markdown theme
+
+library(readr) #to clean and explore data
+library(stringr) #data exploration
+library(tidyverse) #to use dplyr, tidyr, ggplot2
+library(maps) #for county map lines
+library(plotly) #for hover over map
+library(RColorBrewer) #for map color
+```
+
+## 1.3 Data
+1. Starbucks locations from [kaggle](https://www.kaggle.com/kukuroo3/starbucks-locations-worldwide-2021-version)
+2. Census data by county. 2020 data isn't yet available as of Dec 2021. I am using ACS 1 year estimates for 2019 that can be downloaded by state and county
+    + population data by age [here](https://www.census.gov/data/tables/time-series/demo/popest/2010s-counties-detail.html)
+
+For info on Comparing decennial to the ACS
+<https://www.census.gov/content/dam/Census/library/publications/2020/acs/acs_general_handbook_2020_ch09.pdf>
+
+# 2 Starbucks Data
+## 2.1 Data Cleaning Process
+### 2.1.a Load the data
+```{r eval=TRUE, message=FALSE}
+starbucks <- read_csv("~/Dropbox/Data Science Classes/R data visualization/Final Project/starbucks.csv")
+view(starbucks) #to open up the file in a new tab
+```
+### 2.1.b review columns and rows
+This output tells me there are 28,289 rows and 17 columns
+
+to check which columns I want to use and that they are the correct type. 
+
+```{r eval=TRUE}
+str(starbucks)
+```
+Based on this output I want to most likely use:
+
+* ```storeNumber``` as an index
+* ```countryCode``` and filter by the US
+* ```latitude``` for mapping the location
+* ```longitude``` same as above
+* a column that has state (if I'm lucky)
+
+### 2.1.c Filter out only US locations
+
+I can't use all columns as is. I need to filter by ```countryCode``` to pull only US locations and see how I can use the data to filter by state
+
+To filter by ```countryCode``` I want to see the unique rows to see which one is for the US. I also want it ascending so that I can find U easily.
+```{r eval = TRUE}
+starbucks %>%
+  distinct(countryCode) %>% #list out unique county codes
+  arrange(desc(countryCode)) #put in descending order since U is late in the alphabet
+```
+Now I know that US is the ```countryCode```. Obvious, but just had to check.
+
+I can now filter by country and it looks like ```countrySubdivisionCode``` is the state, so I can find Ohio.The output on this markdown file doesn't show this column, but it shows in my Rmd file.
+```{r eval=TRUE}
+starbucks %>% 
+  filter(countryCode == "US")
+```
+### 2.1.d pull only Ohio
+By looking at the disctinct values in ```countrySubdivisionCode``` I can see Ohio is abbreviated as "OH". Obvious, but need to check just in case.
+```{r, eval=TRUE}
+starbucks %>% 
+  filter(countryCode == "US") %>% 
+  distinct(countrySubdivisionCode) %>% 
+  arrange(countrySubdivisionCode)
+  
+```
+
+### 2.1.e Pull out US and OH locations and only the columns I want
+
+Now I can filter for the "US" and "OH" and only pull the columns I wanted above.
+
+Here is a revised list of the columns I want
+
+* ```storeNumber``` as an index
+* ```countryCode``` and filter by the US
+* ```city``` in case I need to cross check the lat/long with city
+* ```latitude``` for mapping the location
+* ```longitude``` same as above
+* ```countrySubdivisionCode``` for the state
+
+While ```filter``` gives me select rows, the ```select``` dplyr function gives me the columns I want
+
+```{r eval=TRUE}
+starbucksOH <- starbucks %>% #I'm going to save it as a new dataframe
+  filter(countryCode == "US" & countrySubdivisionCode == "OH") %>%
+  select(storeNumber, countryCode, city, latitude, longitude, countrySubdivisionCode)
+
+```
+
+### 2.1.f check structure make sure dates are dates, numbers are numbers
+
+```{r eval=TRUE}
+str(starbucksOH)
+
+```
+latitude and longitude are Numbers while the rest are characters and that looks great.
+
+There are 451 starbucks locations in Ohio. To get a gut check, [Spoon university](https://spoonuniversity.com/lifestyle/the-number-of-starbucks-in-every-state) states there are 375, but they don't have a date in their article, so it may be old. 
+
+Spoon's numbers are 16.9% less, which is not too far off to what we have for 2021 data, so I'm going to go with it.
+
+### 2.1.d check for NA values, where are they and is it an issue?
+
+In the code below I am filtering for any rows that have NA in the columns in the parentheses. Looks like there are no NA's.
+
+```{r eval=TRUE}
+starbucksOH %>% 
+  filter(is.na(latitude))
+
+starbucksOH %>% 
+  filter(is.na(longitude))
+
+starbucksOH %>% 
+  filter(is.na(city))
+```
+
+## 2.2 Data manipulation process
+I had thought that I would have to add a table with zip codes and states to get a state column, but there is no need since the ```countrySubdivisionCode``` column is the state.
+
+# 3. Census population data
+## 3.1 data checking process
+### 3.1.a load the data
+```{r eval=TRUE, message=FALSE}
+populationOH <- read_csv("~/Dropbox/Data Science Classes/R data visualization/Final Project/ohioPopByCounty.csv")
+view(populationOH)
+
+```
+
+### 3.1.b check columns
+
+The census population data is estimated based on the last deceinnial year. I know that the "year" is from 1-12 and 12 is 2021.
+
+I want the following columns:
+
+* ```STNAME```
+* ```CTYNAME```
+* ```YEAR``` is going to be 12
+* ```POPESTIMATE```
+
+```{r eval=TRUE, message=FALSE}
+populationOH %>%
+  colnames()
+```
+### 3.1.c Look at data structure
+There are a lot of columns that separate out the population data
+```{r eval=TRUE, message=FALSE}
+populationOH %>%
+  str()
+```
+
+
+## 3.2 population by county final data frame
+```{r eval=TRUE, message=FALSE}
+populationOHv2<- populationOH %>% 
+  filter(YEAR == 12) %>% #get only rows with year 12 which is estimated 2021 data
+  select(STNAME, CTYNAME, YEAR, POPESTIMATE)%>% #extract only these columns
+  mutate(across(CTYNAME, str_replace, " County", "")) %>% #take off "county"
+  mutate(across(CTYNAME, tolower))%>%  #convert to lowercase
+  rename(subregion = CTYNAME) %>% #renames county column to subregion to match county data
+  rename(population = POPESTIMATE) #renames population column
+
+head(populationOHv2)
+
+```
+
+### 3.2.a check for na's in rows
+Skimming through the table there are no NA values
+
+# 4. Visualizations
+## 4.1 Choose population ranges for map index
+I want to know the population rages in the index. I'm cheating a bit here. I'm backtracking after looking into the future. Basically. I made the map and saw that the default index didn't show enough variation in the population, so I am going to make my own index buckets in a new column. I tried to do this after joining the data and what happens is the number or rows increases during the join. I just want to bucket it with a dataset with 1 row per county.
+
+To find the right buckets I'm going to look at a histogram of the population values.
+
+```{r eval=TRUE, message=FALSE}
+# code for histogram in base r, but I want to manipulate the bin width, so I decided to go with ggplot2
+# hist(populationOHv2$population)
+
+ggplot(populationOHv2, aes(x=population)) + 
+  geom_histogram(binwidth=25000) +
+  scale_x_continuous(labels = scales::comma) #this is to get rid of scientific notation in the x axis
+
+```
+From this histogram it looks like 0-100,000 is where most counties are fall. Given this, I want to split up that range in 20k chunks (ie. 0-24,999; 25k-49,999, etc.)
+
+I am going to have the last one be a catch all for anything above because you can hover over the county to see the population
+
+### 4.1.2 Create a new column with these buckets
+I used the mutate function and the cut function in dplyr. The breaks have to equal the labels function.
+```{r eval=TRUE, message=FALSE}
+
+populationOHv3 <- populationOHv2 %>%
+  mutate(populationBuckets = cut(populationOHv2$population, 
+                            breaks = c(0, 25000, 50000, 75000,100000,125000,150000,175000,200000,250000,500000,1000000,1500000,2000000),
+                            include.lowest = T, #min value is included in the interval
+                            right = F, #interval should be left closed keeping the min value
+                            labels = c('0-24,999', '25k-49,999','50k-74,999', '75k-99,999','100k-124,999', '125k-149,999','150k-174,999','175k-199,999','200k-249,999','250k-499,999','500k-999,999','1M-1.49M','1.5M-2M')))
+  
+  head(populationOHv3) #printing the first 6 rows to check the new column
+ 
+  
+```
+
+## 4.2 Population of Ohio
+Next we need to update the r library(maps) that has county latitude and longitude and can depict each county with the updated population
+
+```{r eval=TRUE, message=FALSE}
+countiesOH <- map_data("county") %>%
+    filter(region == "ohio") %>% #only pull ohio data
+    left_join(populationOHv3, by = 'subregion') #join the census data with the county map data
+
+head(countiesOH)
+```
+
+As you can see the dataset is ready to be mapped
+
+```{r eval=TRUE, message=FALSE}
+mapOH <- 
+  ggplot(data = countiesOH, aes(x = long, y = lat,
+                                text = paste("County: ", subregion,
+                                             "<br>Population: ", round(population/1000,digits =1),"k"
+                                             ) 
+                                )) + #for hover text using plotly
+    geom_polygon(aes(group = population, fill = populationBuckets)) +
+    theme_dark() +
+    scale_fill_manual(name = "Population Range", values = c('0-24,999'= '#ffffff', 
+                                  '25k-49,999'= '#f7fcf5' ,
+                                  '50k-74,999'= '#e5f5e0', 
+                                  '75k-99,999'= '#c7e9c0' ,
+                                  '100k-124,999'= '#a1d99b', 
+                                  '125k-149,999'= '#74c476',
+                                  '150k-174,999'= '#41ab5d',
+                                  '175k-199,999'= '#238b45',
+                                  '200k-249,999'= '#006d2c',
+                                  '250k-499,999'= '#238b45',
+                                  '500k-999,999'= '#00441b',
+                                  '1M-1.49M'= '#252525',
+                                  '1.5M-2M' = '#000000' )) 
+
+#When I tried the color brewer it stopped at 9 colors so I added manual colors
+
+mapOH
+
+```
+
+
+TIP: scale is when you are not separating out your numbers into buckets (i.e. if I used the population column). If they are in buckets they are factors and you use fill for color 
+
+## 4.3 Starbucks Map of locations in Ohio
+Here I will add the starbucks locations in Ohio
+```{r eval=TRUE, message=FALSE, warning=FALSE}
+mapOH2 <- mapOH + 
+  ggtitle("Ohio Starbucks Locations and Population") +
+  geom_point(data=starbucksOH, aes(x=longitude, y=latitude,
+              text = paste("Store Number: ", storeNumber)#text here shows what to come up hovering over the dots
+          ))
+
+ggplotly(mapOH2, tooltip = "text")
+
+```
+It looks like population size effects where the starbucks are located in Ohio.
+
+# 5. Challenges and Final Thoughts
+## 5.1 What took the most time
+"3.2 population by county final data frame" took me the most time. Why?
+
+* Searching on the internet I got a lot of base R functions to clean the data. I then had to sleep on it and realize I should find dplyr functions. 
+* I ran into a snag when I tried to run both base R and dplyr functions because my data would no longer be a data frame after running base R functions. First ```mutate()```would give me an error and after searching google I realized it was because my data wasn't a dataframe when I did ```is.data.frame(dataset)```
+* Understanding which functions effected rows (individuals vectors) vs columns was a skill I honed here. This [Column-wise Operations](https://dplyr.tidyverse.org/reference/rename.html) article was very helpful
+
+## 5.2 Final thoughts
+Most of the time definitely went into getting the data to be in the right format for the visualization.
+
